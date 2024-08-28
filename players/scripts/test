@@ -1,1 +1,83 @@
+#!/usr/bin/env python
 
+import rospy
+from turtlesim.srv import Spawn, Kill, TeleportAbsolute
+from turtlesim.msg import Pose
+from geometry_msgs.msg import Twist
+from std_srvs.srv import Empty
+import random
+
+class MultiplayerTurtlesim:
+    def __init__(self):
+        rospy.init_node('multiplayer_turtlesim')
+
+        # Dictionary to store turtle attributes
+        self.turtles = {}
+
+        # Spawn a few turtles
+        self.spawn_turtle('turtle1', 5, 5)
+        self.spawn_turtle('turtle2', 7, 7)
+
+        # Set up subscribers and publishers for each turtle
+        for turtle_name in self.turtles.keys():
+            rospy.Subscriber(f'/{turtle_name}/pose', Pose, self.update_pose, turtle_name)
+            self.turtles[turtle_name]['pub'] = rospy.Publisher(f'/{turtle_name}/cmd_vel', Twist, queue_size=10)
+
+    def spawn_turtle(self, name, x, y):
+        rospy.wait_for_service('spawn')
+        try:
+            spawn_turtle = rospy.ServiceProxy('spawn', Spawn)
+            spawn_turtle(x, y, 0, name)
+            self.turtles[name] = {'health': 100, 'attack': 10, 'x': x, 'y': y, 'pub': None}
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Failed to spawn turtle {name}: {e}")
+
+    def kill_turtle(self, name):
+        rospy.wait_for_service('kill')
+        try:
+            kill_turtle = rospy.ServiceProxy('kill', Kill)
+            kill_turtle(name)
+            del self.turtles[name]
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Failed to kill turtle {name}: {e}")
+
+    def update_pose(self, msg, name):
+        self.turtles[name]['x'] = msg.x
+        self.turtles[name]['y'] = msg.y
+
+    def attack(self, attacker, target):
+        if attacker in self.turtles and target in self.turtles:
+            self.turtles[target]['health'] -= self.turtles[attacker]['attack']
+            rospy.loginfo(f"{attacker} attacked {target}! {target} health: {self.turtles[target]['health']}")
+
+            if self.turtles[target]['health'] <= 0:
+                self.kill_turtle(target)
+                rospy.loginfo(f"{target} has been defeated!")
+
+    def move_turtle(self, name, linear, angular):
+        if name in self.turtles:
+            twist = Twist()
+            twist.linear.x = linear
+            twist.angular.z = angular
+            self.turtles[name]['pub'].publish(twist)
+
+    def run(self):
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            # Randomly move turtles for demonstration
+            for turtle_name in self.turtles.keys():
+                linear_speed = random.uniform(-2, 2)
+                angular_speed = random.uniform(-2, 2)
+                self.move_turtle(turtle_name, linear_speed, angular_speed)
+                
+            # Example attack: turtle1 attacks turtle2
+            self.attack('turtle1', 'turtle2')
+
+            rate.sleep()
+
+if __name__ == '__main__':
+    try:
+        game = MultiplayerTurtlesim()
+        game.run()
+    except rospy.ROSInterruptException:
+        pass
